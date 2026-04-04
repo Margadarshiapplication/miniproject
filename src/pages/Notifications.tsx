@@ -1,0 +1,11 @@
+const Notifications = () => (
+  <div className="px-4 py-6 space-y-6">
+    <h1 className="text-2xl font-bold font-heading">Notifications</h1>
+    <p className="text-sm text-muted-foreground">Stay updated on your trips and recommendations.</p>
+    <div className="flex min-h-[40vh] items-center justify-center rounded-xl border border-dashed border-border">
+      <p className="text-sm text-muted-foreground">No notifications</p>
+    </div>
+  </div>
+);
+
+export default Notifications;
