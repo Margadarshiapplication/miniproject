@@ -6,10 +6,10 @@ interface Profile {
   id: string;
   display_name: string | null;
   avatar_url: string | null;
-  travel_style: string[];
-  budget_preference: string;
-  preferred_destinations: string[];
-  has_completed_onboarding: boolean;
+  travel_style: string[] | null;
+  budget_preference: string | null;
+  preferred_destinations: string[] | null;
+  has_completed_onboarding: boolean | null;
 }
 
 interface AuthContextType {
@@ -30,12 +30,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState(true);
 
   const fetchProfile = async (userId: string) => {
-    const { data } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", userId)
-      .single();
-    setProfile(data as Profile | null);
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", userId)
+        .single();
+      if (error) {
+        console.error("Failed to fetch profile:", error.message);
+        setProfile(null);
+        return;
+      }
+      setProfile(data as Profile | null);
+    } catch (err) {
+      console.error("Unexpected error fetching profile:", err);
+      setProfile(null);
+    }
   };
 
   const refreshProfile = async () => {

@@ -18,6 +18,8 @@ interface GeneratedItinerary {
   tips: string[];
 }
 
+const API_URL = import.meta.env.VITE_API_URL || "";
+
 export const useGenerateItinerary = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [result, setResult] = useState<GeneratedItinerary | null>(null);
@@ -32,21 +34,23 @@ export const useGenerateItinerary = () => {
     setIsGenerating(true);
     setResult(null);
     try {
-      const resp = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-itinerary`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-          },
-          body: JSON.stringify(params),
-        }
-      );
+      // Get user session for auth
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) throw new Error("Not authenticated");
+
+      const resp = await fetch(`${API_URL}/api/itinerary`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(params),
+      });
 
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({ error: "Failed" }));
-        throw new Error(err.error || `HTTP ${resp.status}`);
+        throw new Error(err.error || err.detail || `HTTP ${resp.status}`);
       }
 
       const data: GeneratedItinerary = await resp.json();

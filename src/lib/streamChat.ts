@@ -2,7 +2,7 @@ import { supabase } from "@/integrations/supabase/client";
 
 export type Msg = { role: "user" | "assistant"; content: string };
 
-const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
+const API_URL = import.meta.env.VITE_API_URL || "";
 
 export async function streamChat({
   messages,
@@ -22,12 +22,11 @@ export async function streamChat({
   const token = session?.access_token;
   if (!token) throw new Error("Not authenticated");
 
-  const resp = await fetch(CHAT_URL, {
+  const resp = await fetch(`${API_URL}/api/chat`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
-      apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
     },
     body: JSON.stringify({ messages, conversation_id: conversationId }),
     signal,
@@ -35,7 +34,7 @@ export async function streamChat({
 
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({ error: "Request failed" }));
-    throw new Error(err.error || `HTTP ${resp.status}`);
+    throw new Error(err.error || err.detail || `HTTP ${resp.status}`);
   }
 
   if (!resp.body) throw new Error("No response body");
@@ -64,7 +63,8 @@ export async function streamChat({
 
       try {
         const parsed = JSON.parse(jsonStr);
-        const content = parsed.choices?.[0]?.delta?.content as string | undefined;
+        // Support both OpenAI-style delta and simple {content} format
+        const content = parsed.choices?.[0]?.delta?.content ?? parsed.content;
         if (content) onDelta(content);
       } catch {
         textBuffer = line + "\n" + textBuffer;
@@ -84,7 +84,7 @@ export async function streamChat({
       if (jsonStr === "[DONE]") continue;
       try {
         const parsed = JSON.parse(jsonStr);
-        const content = parsed.choices?.[0]?.delta?.content as string | undefined;
+        const content = parsed.choices?.[0]?.delta?.content ?? parsed.content;
         if (content) onDelta(content);
       } catch { /* ignore */ }
     }
