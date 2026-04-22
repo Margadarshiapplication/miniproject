@@ -1,97 +1,87 @@
 """
-Gemma 3 1B model loader and inference pipeline.
-Downloads google/gemma-3-1b-it from Hugging Face Hub on startup
-and provides a generate() function for text generation.
+Margdarshi AI model — uses NVIDIA NIM API for instant responses.
+
+NVIDIA API is OpenAI-compatible, runs on NVIDIA's GPUs, giving 2-3 second
+responses instead of ~30s with local CPU inference.
+
+Requires NVIDIA_API_KEY environment variable (set in HF Space secrets).
 """
 
 import os
 import logging
-from threading import Lock
+import requests
 
 logger = logging.getLogger(__name__)
 
-_pipeline = None
-_lock = Lock()
+_pipeline = None  # Set to truthy when client is ready
+
+MODEL_ID = "meta/llama-3.1-8b-instruct"
+NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 
 
 def load_model():
-    """
-    Download and initialize the Gemma 3 1B model.
-    Called once at server startup. Uses HF_TOKEN for gated model access.
-    """
+    """Initialize: just verify the API key is set. No model download needed."""
     global _pipeline
 
-    from huggingface_hub import login
-    from transformers import pipeline
+    api_key = os.environ.get("NVIDIA_API_KEY")
+    if not api_key:
+        raise RuntimeError("NVIDIA_API_KEY not set. Add it to HF Space secrets.")
 
-    hf_token = os.environ.get("HF_TOKEN", "")
-    if hf_token:
-        logger.info("Logging in to Hugging Face Hub...")
-        login(token=hf_token)
-    else:
-        logger.warning("HF_TOKEN not set — model download may fail for gated models.")
-
-    model_id = "google/gemma-3-1b-it"
-    logger.info(f"Loading model: {model_id} (this may take a few minutes on first run)...")
-
-    _pipeline = pipeline(
-        "text-generation",
-        model=model_id,
-        device_map="auto",
-        torch_dtype="auto",
-    )
-
-    logger.info(f"Model {model_id} loaded successfully.")
+    # Mark as ready
+    _pipeline = True
+    logger.info(f"NVIDIA API ready (model: {MODEL_ID})")
 
 
 def generate(
     messages: list[dict],
-    max_new_tokens: int = 1024,
+    max_new_tokens: int = 512,
     temperature: float = 0.7,
     top_p: float = 0.9,
 ) -> str:
     """
-    Generate a response given a list of chat messages.
-    
+    Generate a response using the NVIDIA NIM API.
+
     Args:
         messages: List of dicts with 'role' and 'content' keys.
-        max_new_tokens: Maximum tokens to generate.
+        max_new_tokens: Max tokens to generate.
         temperature: Sampling temperature.
-        top_p: Nucleus sampling parameter.
-    
+        top_p: Nucleus sampling.
+
     Returns:
         Generated text string.
     """
-    global _pipeline
+    api_key = os.environ.get("NVIDIA_API_KEY")
+    if not api_key:
+        raise RuntimeError("NVIDIA_API_KEY not configured.")
 
-    if _pipeline is None:
-        raise RuntimeError("Model not loaded. Call load_model() first.")
-
-    with _lock:
-        outputs = _pipeline(
-            messages,
-            max_new_tokens=max_new_tokens,
-            temperature=temperature,
-            top_p=top_p,
-            do_sample=True,
+    try:
+        resp = requests.post(
+            NVIDIA_API_URL,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": MODEL_ID,
+                "messages": messages,
+                "max_tokens": max_new_tokens,
+                "temperature": temperature,
+                "top_p": top_p,
+                "stream": False,
+            },
+            timeout=30,
         )
 
-    # Extract the assistant's response from pipeline output
-    generated = outputs[0]["generated_text"]
+        if resp.status_code != 200:
+            error_detail = resp.text[:300]
+            logger.error(f"NVIDIA API error {resp.status_code}: {error_detail}")
+            raise RuntimeError(f"NVIDIA API returned {resp.status_code}: {error_detail}")
 
-    # The pipeline returns the full conversation; extract the last assistant message
-    if isinstance(generated, list):
-        # Chat pipeline returns list of message dicts
-        for msg in reversed(generated):
-            if isinstance(msg, dict) and msg.get("role") == "assistant":
-                return msg.get("content", "")
-        # Fallback: return the last message content
-        if generated:
-            last = generated[-1]
-            if isinstance(last, dict):
-                return last.get("content", str(last))
-            return str(last)
-    elif isinstance(generated, str):
-        return generated
+        data = resp.json()
+        content = data["choices"][0]["message"]["content"]
+        return content.strip()
 
-    return str(generated)
+    except requests.Timeout:
+        raise RuntimeError("NVIDIA API timed out. Try again.")
+    except requests.RequestException as e:
+        raise RuntimeError(f"NVIDIA API request failed: {e}")

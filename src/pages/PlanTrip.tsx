@@ -16,9 +16,11 @@ import { useAddActivity } from "@/hooks/useActivities";
 import { useGenerateItinerary } from "@/hooks/useGenerateItinerary";
 import { destinations } from "@/data/destinations";
 import { toast } from "@/hooks/use-toast";
+import { useQueryClient } from "@tanstack/react-query";
 
 const PlanTrip = () => {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const createTrip = useCreateTrip();
   const addActivity = useAddActivity();
   const { generate, isGenerating } = useGenerateItinerary();
@@ -53,9 +55,11 @@ const PlanTrip = () => {
       return;
     }
 
+    let trip: { id: string };
+
     try {
       const days = differenceInDays(endDate, startDate) + 1;
-      const trip = await createTrip.mutateAsync({
+      trip = await createTrip.mutateAsync({
         destination: destination.trim(),
         destination_id: destinationId,
         start_date: format(startDate, "yyyy-MM-dd"),
@@ -65,9 +69,16 @@ const PlanTrip = () => {
         notes: notes.trim() || undefined,
         cover_image: destinationId ? destinations.find((d) => d.id === destinationId)?.image : undefined,
       });
+    } catch {
+      toast({ title: "Error", description: "Failed to create trip. Please try again.", variant: "destructive" });
+      return;
+    }
 
-      // Generate AI itinerary
-      toast({ title: "Trip created!", description: "Generating AI itinerary..." });
+    // Generate AI itinerary BEFORE navigating (so user sees activities immediately)
+    toast({ title: "Trip created!", description: "Generating AI itinerary... Please wait ✨" });
+
+    try {
+      const days = differenceInDays(endDate, startDate) + 1;
       const itinerary = await generate({
         destination: destination.trim(),
         days,
@@ -76,7 +87,6 @@ const PlanTrip = () => {
         preferences: notes.trim() || undefined,
       });
 
-      // Save generated activities
       if (itinerary?.activities) {
         for (let i = 0; i < itinerary.activities.length; i++) {
           const a = itinerary.activities[i];
@@ -92,13 +102,25 @@ const PlanTrip = () => {
             sort_order: i,
           });
         }
-        toast({ title: "Itinerary ready! ✨", description: `${itinerary.activities.length} activities generated.` });
+        // Invalidate the activities cache so Itinerary page shows them immediately
+        await queryClient.invalidateQueries({ queryKey: ["trip_activities", trip.id] });
+        toast({ title: "Itinerary ready! \u2728", description: `${itinerary.activities.length} activities generated.` });
       }
-
-      navigate(`/itinerary/${trip.id}`);
-    } catch {
-      toast({ title: "Error", description: "Failed to create trip. Please try again.", variant: "destructive" });
+    } catch (aiErr) {
+      // AI failed but trip was already saved — just inform the user
+      const aiMsg = aiErr instanceof Error ? aiErr.message : "AI generation failed.";
+      toast({
+        title: "AI generation skipped",
+        description: aiMsg.includes("loading")
+          ? "The AI model is warming up. Add activities manually or try again soon."
+          : "Could not generate itinerary. You can add activities manually.",
+        variant: "destructive",
+      });
     }
+
+    // Navigate AFTER activities are saved so the page shows them
+    navigate(`/itinerary/${trip.id}`);
+
   };
 
   return (
