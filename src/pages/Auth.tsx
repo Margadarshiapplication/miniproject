@@ -97,9 +97,9 @@ const Auth = () => {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background px-4 py-8">
       {/* Logo */}
-      <div className="mb-8 text-center">
-        <h1 className="text-3xl font-bold font-heading text-primary">Margdarshi</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Your AI travel companion</p>
+      <div className="mb-8 text-center flex flex-col items-center">
+        <img src="/logo.png" alt="Margdarshi" className="h-36 w-36 object-contain mb-2 drop-shadow-lg" />
+        <p className="mt-1 text-sm text-muted-foreground">Your AI Travel Companion 🇮🇳</p>
       </div>
 
       <Card className="w-full max-w-sm shadow-lg">

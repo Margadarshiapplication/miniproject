@@ -1,11 +1,71 @@
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { MapPin, Sparkles, Compass, ChevronRight, Calendar } from "lucide-react";
+import { MapPin, Sparkles, Compass, ChevronRight, Calendar, ArrowLeftRight, HelpCircle, RefreshCw } from "lucide-react";
 import { format } from "date-fns";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/contexts/AuthContext";
 import { destinations } from "@/data/destinations";
 import { useTrips } from "@/hooks/useTrips";
+
+// All supported currencies
+const CURRENCIES = [
+  { code: "USD", name: "US Dollar", symbol: "$" },
+  { code: "EUR", name: "Euro", symbol: "€" },
+  { code: "GBP", name: "British Pound", symbol: "£" },
+  { code: "JPY", name: "Japanese Yen", symbol: "¥" },
+  { code: "AUD", name: "Australian Dollar", symbol: "A$" },
+  { code: "CAD", name: "Canadian Dollar", symbol: "C$" },
+  { code: "SGD", name: "Singapore Dollar", symbol: "S$" },
+  { code: "THB", name: "Thai Baht", symbol: "฿" },
+  { code: "AED", name: "UAE Dirham", symbol: "د.إ" },
+  { code: "MYR", name: "Malaysian Ringgit", symbol: "RM" },
+  { code: "LKR", name: "Sri Lankan Rupee", symbol: "Rs" },
+  { code: "NPR", name: "Nepalese Rupee", symbol: "रू" },
+  { code: "BDT", name: "Bangladeshi Taka", symbol: "৳" },
+  { code: "CHF", name: "Swiss Franc", symbol: "Fr" },
+  { code: "CNY", name: "Chinese Yuan", symbol: "¥" },
+  { code: "KRW", name: "South Korean Won", symbol: "₩" },
+  { code: "NZD", name: "New Zealand Dollar", symbol: "NZ$" },
+  { code: "ZAR", name: "South African Rand", symbol: "R" },
+  { code: "SEK", name: "Swedish Krona", symbol: "kr" },
+  { code: "IDR", name: "Indonesian Rupiah", symbol: "Rp" },
+];
+
+// Cache key for rates
+const RATES_CACHE_KEY = "margdarshi_exchange_rates";
+const CACHE_TTL = 3600000; // 1 hour
+
+interface CachedRates {
+  rates: Record<string, number>;
+  timestamp: number;
+}
+
+function getCachedRates(): CachedRates | null {
+  try {
+    const raw = localStorage.getItem(RATES_CACHE_KEY);
+    if (!raw) return null;
+    const cached: CachedRates = JSON.parse(raw);
+    if (Date.now() - cached.timestamp > CACHE_TTL) return null;
+    return cached;
+  } catch {
+    return null;
+  }
+}
+
+function setCachedRates(rates: Record<string, number>) {
+  localStorage.setItem(RATES_CACHE_KEY, JSON.stringify({ rates, timestamp: Date.now() }));
+}
+
+// Fallback rates (approximate, April 2026)
+const FALLBACK_RATES: Record<string, number> = {
+  USD: 0.0119, EUR: 0.0108, GBP: 0.0094, JPY: 1.78, AUD: 0.0183,
+  CAD: 0.0163, SGD: 0.016, THB: 0.41, AED: 0.0437, MYR: 0.053,
+  LKR: 3.55, NPR: 1.6, BDT: 1.43, CHF: 0.0105, CNY: 0.087,
+  KRW: 16.3, NZD: 0.02, ZAR: 0.215, SEK: 0.124, IDR: 188,
+};
 
 const Index = () => {
   const navigate = useNavigate();
@@ -14,6 +74,47 @@ const Index = () => {
   const recentTrips = trips?.slice(0, 3) ?? [];
 
   const displayName = profile?.display_name || "Traveler";
+
+  // Currency converter state
+  const [convAmount, setConvAmount] = useState("1000");
+  const [convTo, setConvTo] = useState("USD");
+  const [rates, setRates] = useState<Record<string, number>>(FALLBACK_RATES);
+  const [ratesLoading, setRatesLoading] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<string>("");
+
+  const fetchLiveRates = async () => {
+    setRatesLoading(true);
+    try {
+      // Free API — no key required
+      const res = await fetch("https://api.exchangerate-api.com/v4/latest/INR");
+      if (res.ok) {
+        const data = await res.json();
+        setRates(data.rates);
+        setCachedRates(data.rates);
+        setLastUpdated(new Date().toLocaleTimeString());
+      }
+    } catch {
+      // Use fallback rates silently
+    } finally {
+      setRatesLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const cached = getCachedRates();
+    if (cached) {
+      setRates(cached.rates);
+      setLastUpdated(new Date(cached.timestamp).toLocaleTimeString());
+    } else {
+      fetchLiveRates();
+    }
+  }, []);
+
+  const converted = convAmount && rates[convTo]
+    ? (parseFloat(convAmount) * rates[convTo]).toFixed(2)
+    : "—";
+
+  const currSymbol = CURRENCIES.find((c) => c.code === convTo)?.symbol || "";
 
   // Suggest destinations based on user's travel_style preferences
   const suggested = profile?.travel_style?.length
@@ -55,6 +156,64 @@ const Index = () => {
           </Card>
         ))}
       </div>
+
+      {/* Currency Converter */}
+      <Card className="overflow-hidden">
+        <CardContent className="p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold flex items-center gap-2">
+              <ArrowLeftRight className="h-4 w-4 text-primary" /> Currency Converter
+            </h3>
+            <button
+              onClick={fetchLiveRates}
+              disabled={ratesLoading}
+              className="text-xs text-muted-foreground hover:text-primary flex items-center gap-1 transition-colors"
+            >
+              <RefreshCw className={`h-3 w-3 ${ratesLoading ? "animate-spin" : ""}`} />
+              {ratesLoading ? "Updating..." : "Refresh"}
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <div className="flex-1">
+              <p className="text-[10px] text-muted-foreground mb-1">INR (₹)</p>
+              <Input
+                type="number"
+                placeholder="Amount in INR"
+                value={convAmount}
+                onChange={(e) => setConvAmount(e.target.value)}
+                className="text-sm"
+              />
+            </div>
+            <ArrowLeftRight className="h-4 w-4 text-muted-foreground shrink-0 mt-4" />
+            <div className="flex-1">
+              <p className="text-[10px] text-muted-foreground mb-1">{convTo} ({currSymbol})</p>
+              <div className="rounded-md border bg-muted/50 px-3 py-2 text-sm font-bold text-primary">
+                {currSymbol}{converted}
+              </div>
+            </div>
+          </div>
+
+          <Select value={convTo} onValueChange={setConvTo}>
+            <SelectTrigger className="text-xs">
+              <SelectValue placeholder="Select currency" />
+            </SelectTrigger>
+            <SelectContent>
+              {CURRENCIES.map((c) => (
+                <SelectItem key={c.code} value={c.code}>
+                  {c.symbol} {c.code} — {c.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {lastUpdated && (
+            <p className="text-[10px] text-muted-foreground text-center">
+              Rates updated: {lastUpdated} · Powered by ExchangeRate API
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Recent Trips */}
       <div>
@@ -142,6 +301,23 @@ const Index = () => {
           ))}
         </div>
       </div>
+
+      {/* Help & Support Card */}
+      <Card
+        className="cursor-pointer hover:shadow-md transition-all active:scale-[0.98] bg-muted/30"
+        onClick={() => navigate("/support")}
+      >
+        <CardContent className="flex items-center gap-3 p-4">
+          <div className="rounded-xl bg-primary/10 p-2.5">
+            <HelpCircle className="h-5 w-5 text-primary" />
+          </div>
+          <div className="flex-1">
+            <p className="text-sm font-bold">Help & Support</p>
+            <p className="text-xs text-muted-foreground">FAQs · Contact us · Report issues</p>
+          </div>
+          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+        </CardContent>
+      </Card>
     </div>
   );
 };

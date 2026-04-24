@@ -1,4 +1,5 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useUpdateProfile, useUploadAvatar } from "@/hooks/useProfile";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -9,13 +10,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { Camera, LogOut, User, MapPin, Wallet, Loader2 } from "lucide-react";
+import { Camera, LogOut, User, MapPin, Wallet, Loader2, Sun, Moon, Monitor, HelpCircle, Mail } from "lucide-react";
 import { toast } from "sonner";
 
 const TRAVEL_STYLES = ["Adventure", "Cultural", "Relaxation", "Food & Drink", "Nature", "Nightlife", "Shopping", "History"];
 const DESTINATIONS = ["Beach", "Mountains", "City", "Countryside", "Desert", "Tropical", "Arctic", "Islands"];
 
+type ThemeMode = "light" | "dark" | "system";
+
 const Profile = () => {
+  const navigate = useNavigate();
   const { user, profile, signOut } = useAuth();
   const updateProfile = useUpdateProfile();
   const uploadAvatar = useUploadAvatar();
@@ -25,6 +29,24 @@ const Profile = () => {
   const [budgetPref, setBudgetPref] = useState(profile?.budget_preference || "moderate");
   const [travelStyles, setTravelStyles] = useState<string[]>(profile?.travel_style || []);
   const [destinations, setDestinations] = useState<string[]>(profile?.preferred_destinations || []);
+
+  // Dark/Light mode
+  const [theme, setTheme] = useState<ThemeMode>(() => {
+    return (localStorage.getItem("margdarshi-theme") as ThemeMode) || "system";
+  });
+
+  useEffect(() => {
+    const root = document.documentElement;
+    localStorage.setItem("margdarshi-theme", theme);
+    root.classList.remove("light", "dark");
+
+    if (theme === "system") {
+      const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      root.classList.add(prefersDark ? "dark" : "light");
+    } else {
+      root.classList.add(theme);
+    }
+  }, [theme]);
 
   const toggleItem = (list: string[], item: string, setter: (v: string[]) => void) => {
     setter(list.includes(item) ? list.filter((i) => i !== item) : [...list, item]);
@@ -112,6 +134,47 @@ const Profile = () => {
         </CardContent>
       </Card>
 
+      {/* Appearance — Dark/Light Mode */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Sun className="h-4 w-4" /> Appearance
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-xs text-muted-foreground mb-3">Choose your preferred theme</p>
+          <div className="grid grid-cols-3 gap-2">
+            <button
+              onClick={() => setTheme("light")}
+              className={`flex flex-col items-center gap-1.5 rounded-lg border-2 p-3 transition-all ${
+                theme === "light" ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"
+              }`}
+            >
+              <Sun className={`h-5 w-5 ${theme === "light" ? "text-primary" : "text-muted-foreground"}`} />
+              <span className="text-xs font-medium">Light</span>
+            </button>
+            <button
+              onClick={() => setTheme("dark")}
+              className={`flex flex-col items-center gap-1.5 rounded-lg border-2 p-3 transition-all ${
+                theme === "dark" ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"
+              }`}
+            >
+              <Moon className={`h-5 w-5 ${theme === "dark" ? "text-primary" : "text-muted-foreground"}`} />
+              <span className="text-xs font-medium">Dark</span>
+            </button>
+            <button
+              onClick={() => setTheme("system")}
+              className={`flex flex-col items-center gap-1.5 rounded-lg border-2 p-3 transition-all ${
+                theme === "system" ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"
+              }`}
+            >
+              <Monitor className={`h-5 w-5 ${theme === "system" ? "text-primary" : "text-muted-foreground"}`} />
+              <span className="text-xs font-medium">System</span>
+            </button>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Travel Style */}
       <Card>
         <CardHeader className="pb-3">
@@ -155,6 +218,20 @@ const Profile = () => {
               </Badge>
             ))}
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Help & Support */}
+      <Card className="cursor-pointer hover:shadow-md transition-all" onClick={() => navigate("/support")}>
+        <CardContent className="flex items-center gap-3 p-4">
+          <div className="rounded-xl bg-primary/10 p-2.5">
+            <HelpCircle className="h-5 w-5 text-primary" />
+          </div>
+          <div className="flex-1">
+            <p className="text-sm font-medium">Help & Support</p>
+            <p className="text-xs text-muted-foreground">FAQs, contact us, report issues</p>
+          </div>
+          <Mail className="h-4 w-4 text-muted-foreground" />
         </CardContent>
       </Card>
 
