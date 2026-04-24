@@ -77,6 +77,7 @@ const PlanTrip = () => {
     // Generate AI itinerary BEFORE navigating (so user sees activities immediately)
     toast({ title: "Trip created!", description: "Generating AI itinerary... Please wait ✨" });
 
+    let aiSuccess = false;
     try {
       const days = differenceInDays(endDate, startDate) + 1;
       const itinerary = await generate({
@@ -87,7 +88,8 @@ const PlanTrip = () => {
         preferences: notes.trim() || undefined,
       });
 
-      if (itinerary?.activities) {
+      // generate() now throws on error, so if we reach here it succeeded
+      if (itinerary?.activities?.length) {
         for (let i = 0; i < itinerary.activities.length; i++) {
           const a = itinerary.activities[i];
           await addActivity.mutateAsync({
@@ -104,22 +106,26 @@ const PlanTrip = () => {
         }
         // Invalidate the activities cache so Itinerary page shows them immediately
         await queryClient.invalidateQueries({ queryKey: ["trip_activities", trip.id] });
-        toast({ title: "Itinerary ready! \u2728", description: `${itinerary.activities.length} activities generated.` });
+        toast({ title: "Itinerary ready! ✨", description: `${itinerary.activities.length} activities generated.` });
+        aiSuccess = true;
       }
     } catch (aiErr) {
-      // AI failed but trip was already saved — just inform the user
+      // AI failed but trip was already saved — inform the user with a specific message
       const aiMsg = aiErr instanceof Error ? aiErr.message : "AI generation failed.";
       toast({
         title: "AI generation skipped",
-        description: aiMsg.includes("loading")
+        description: aiMsg.includes("timed out")
+          ? "The AI server is busy. You can add activities manually or regenerate later."
+          : aiMsg.includes("loading") || aiMsg.includes("warming")
           ? "The AI model is warming up. Add activities manually or try again soon."
-          : "Could not generate itinerary. You can add activities manually.",
+          : `${aiMsg}. You can add activities manually.`,
         variant: "destructive",
       });
     }
 
     // Navigate AFTER activities are saved so the page shows them
     navigate(`/itinerary/${trip.id}`);
+
 
   };
 

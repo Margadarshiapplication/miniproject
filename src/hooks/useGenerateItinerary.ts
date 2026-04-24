@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { toast } from "@/hooks/use-toast";
 
 interface GeneratedActivity {
   day_number: number;
@@ -30,40 +29,54 @@ export const useGenerateItinerary = () => {
     budget?: number;
     travelers?: number;
     preferences?: string;
-  }) => {
+  }): Promise<GeneratedItinerary> => {
     setIsGenerating(true);
     setResult(null);
     try {
-      // Get user session for auth
+      // Get user session for auth header (optional — backend doesn't require it)
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
-      if (!token) throw new Error("Not authenticated");
+
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
+      // Use AbortController for a 45-second timeout (NVIDIA API + Pexels enrichment can be slow)
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 45000);
 
       const resp = await fetch(`${API_URL}/api/itinerary`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
+        headers,
         body: JSON.stringify(params),
+        signal: controller.signal,
       });
 
+      clearTimeout(timeoutId);
+
       if (!resp.ok) {
-        const err = await resp.json().catch(() => ({ error: "Failed" }));
+        const err = await resp.json().catch(() => ({ error: "Server error" }));
         throw new Error(err.error || err.detail || `HTTP ${resp.status}`);
       }
 
       const data: GeneratedItinerary = await resp.json();
+
+      // Validate the response has activities
+      if (!data.activities || !Array.isArray(data.activities) || data.activities.length === 0) {
+        throw new Error("AI returned empty itinerary. Please try again.");
+      }
+
       setResult(data);
       return data;
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : "Could not generate itinerary. Try again.";
-      toast({
-        title: "Generation failed",
-        description: message,
-        variant: "destructive",
-      });
-      return null;
+      // Re-throw so the caller (PlanTrip) can handle it
+      if (e instanceof DOMException && e.name === "AbortError") {
+        throw new Error("Request timed out. The AI server may be busy — please try again.");
+      }
+      throw e instanceof Error ? e : new Error("Could not generate itinerary. Try again.");
     } finally {
       setIsGenerating(false);
     }

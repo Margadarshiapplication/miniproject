@@ -37,6 +37,7 @@ def generate(
     max_new_tokens: int = 512,
     temperature: float = 0.7,
     top_p: float = 0.9,
+    _retries: int = 1,
 ) -> str:
     """
     Generate a response using the NVIDIA NIM API.
@@ -46,6 +47,7 @@ def generate(
         max_new_tokens: Max tokens to generate.
         temperature: Sampling temperature.
         top_p: Nucleus sampling.
+        _retries: Number of retry attempts on transient failures.
 
     Returns:
         Generated text string.
@@ -54,34 +56,50 @@ def generate(
     if not api_key:
         raise RuntimeError("NVIDIA_API_KEY not configured.")
 
-    try:
-        resp = requests.post(
-            NVIDIA_API_URL,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": MODEL_ID,
-                "messages": messages,
-                "max_tokens": max_new_tokens,
-                "temperature": temperature,
-                "top_p": top_p,
-                "stream": False,
-            },
-            timeout=30,
-        )
+    last_error = None
+    for attempt in range(_retries + 1):
+        try:
+            resp = requests.post(
+                NVIDIA_API_URL,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": MODEL_ID,
+                    "messages": messages,
+                    "max_tokens": max_new_tokens,
+                    "temperature": temperature,
+                    "top_p": top_p,
+                    "stream": False,
+                },
+                timeout=45,
+            )
 
-        if resp.status_code != 200:
+            if resp.status_code == 200:
+                data = resp.json()
+                content = data["choices"][0]["message"]["content"]
+                return content.strip()
+
             error_detail = resp.text[:300]
-            logger.error(f"NVIDIA API error {resp.status_code}: {error_detail}")
-            raise RuntimeError(f"NVIDIA API returned {resp.status_code}: {error_detail}")
+            logger.error(f"NVIDIA API error {resp.status_code} (attempt {attempt + 1}): {error_detail}")
+            last_error = RuntimeError(f"NVIDIA API returned {resp.status_code}: {error_detail}")
 
-        data = resp.json()
-        content = data["choices"][0]["message"]["content"]
-        return content.strip()
+            # Retry on 429 (rate limit), 500, 502, 503, 504
+            if resp.status_code in (429, 500, 502, 503, 504) and attempt < _retries:
+                import time
+                time.sleep(2)
+                continue
+            raise last_error
 
-    except requests.Timeout:
-        raise RuntimeError("NVIDIA API timed out. Try again.")
-    except requests.RequestException as e:
-        raise RuntimeError(f"NVIDIA API request failed: {e}")
+        except requests.Timeout:
+            last_error = RuntimeError("NVIDIA API timed out. Try again.")
+            if attempt < _retries:
+                import time
+                time.sleep(2)
+                continue
+            raise last_error
+        except requests.RequestException as e:
+            raise RuntimeError(f"NVIDIA API request failed: {e}")
+
+    raise last_error or RuntimeError("NVIDIA API failed after retries.")
