@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, lazy, Suspense } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { format, differenceInDays, addDays } from "date-fns";
-import { ArrowLeft, Plus, MapPin, Clock, IndianRupee, CheckCircle2, Circle, Calendar } from "lucide-react";
+import { ArrowLeft, Plus, MapPin, Clock, IndianRupee, CheckCircle2, Circle, Calendar, Map, Navigation, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -12,8 +12,36 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useTrip, useTripActivities, useAddActivity, useToggleActivity, type TripActivity } from "@/hooks/useTrips";
 import { toast } from "@/hooks/use-toast";
+import { getGoogleMapsUrl } from "@/lib/geo";
 
-const ActivityCard = ({ activity, tripId }: { activity: TripActivity; tripId: string }) => {
+// Lazy load map components (they're heavy)
+const TripMap = lazy(() => import("@/components/TripMap"));
+const NearbyAttractions = lazy(() => import("@/components/NearbyAttractions"));
+
+const MapFallback = () => (
+  <div className="rounded-xl border bg-muted/30 flex items-center justify-center h-[300px]">
+    <div className="flex flex-col items-center gap-2 text-muted-foreground">
+      <div className="h-5 w-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      <span className="text-xs">Loading map...</span>
+    </div>
+  </div>
+);
+
+/** Clickable location that opens Google Maps */
+const LocationLink = ({ location, destination }: { location: string; destination: string }) => (
+  <a
+    href={getGoogleMapsUrl(location, destination)}
+    target="_blank"
+    rel="noopener noreferrer"
+    className="flex items-center gap-1 text-primary hover:underline cursor-pointer"
+    title={`Open ${location} in Google Maps`}
+  >
+    <MapPin className="h-3 w-3" /> {location}
+    <ExternalLink className="h-2.5 w-2.5 opacity-50" />
+  </a>
+);
+
+const ActivityCard = ({ activity, tripId, destination }: { activity: TripActivity; tripId: string; destination: string }) => {
   const toggleActivity = useToggleActivity();
 
   return (
@@ -52,9 +80,7 @@ const ActivityCard = ({ activity, tripId }: { activity: TripActivity; tripId: st
               </span>
             )}
             {activity.location && (
-              <span className="flex items-center gap-1">
-                <MapPin className="h-3 w-3" /> {activity.location}
-              </span>
+              <LocationLink location={activity.location} destination={destination} />
             )}
             {activity.estimated_cost > 0 && (
               <span className="flex items-center gap-1">
@@ -132,6 +158,7 @@ const Itinerary = () => {
   const { data: trip, isLoading: tripLoading } = useTrip(id);
   const { data: activities } = useTripActivities(id);
   const [dialogDay, setDialogDay] = useState<number | null>(null);
+  const [activeView, setActiveView] = useState<"timeline" | "map" | "nearby">("timeline");
 
   if (tripLoading) {
     return (
@@ -153,6 +180,16 @@ const Itinerary = () => {
 
   const totalDays = differenceInDays(new Date(trip.end_date), new Date(trip.start_date)) + 1;
   const totalCost = activities?.reduce((sum, a) => sum + Number(a.estimated_cost || 0), 0) ?? 0;
+
+  const mapActivities = (activities || [])
+    .filter((a) => a.location)
+    .map((a) => ({
+      title: a.title,
+      location: a.location || "",
+      time_slot: a.time_slot || undefined,
+      estimated_cost: a.estimated_cost,
+      day_number: a.day_number,
+    }));
 
   return (
     <div className="px-4 py-6 space-y-5">
@@ -206,61 +243,114 @@ const Itinerary = () => {
         </div>
       )}
 
-      {/* Day-by-day Timeline */}
-      <Tabs defaultValue="1">
-        <TabsList className="w-full overflow-x-auto flex">
-          {Array.from({ length: totalDays }, (_, i) => (
-            <TabsTrigger key={i + 1} value={String(i + 1)} className="flex-shrink-0 text-xs">
-              Day {i + 1}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-        {Array.from({ length: totalDays }, (_, i) => {
-          const dayNum = i + 1;
-          const dayActivities = activities?.filter((a) => a.day_number === dayNum) ?? [];
-          const dayDate = addDays(new Date(trip.start_date), i);
+      {/* View Toggle: Timeline / Map / Nearby */}
+      <div className="flex gap-1 bg-muted rounded-lg p-1">
+        <button
+          className={`flex-1 text-xs font-medium py-2 px-3 rounded-md flex items-center justify-center gap-1.5 transition-colors ${
+            activeView === "timeline" ? "bg-background shadow text-foreground" : "text-muted-foreground"
+          }`}
+          onClick={() => setActiveView("timeline")}
+        >
+          <Calendar className="h-3.5 w-3.5" /> Timeline
+        </button>
+        <button
+          className={`flex-1 text-xs font-medium py-2 px-3 rounded-md flex items-center justify-center gap-1.5 transition-colors ${
+            activeView === "map" ? "bg-background shadow text-foreground" : "text-muted-foreground"
+          }`}
+          onClick={() => setActiveView("map")}
+        >
+          <Map className="h-3.5 w-3.5" /> Map View
+        </button>
+        <button
+          className={`flex-1 text-xs font-medium py-2 px-3 rounded-md flex items-center justify-center gap-1.5 transition-colors ${
+            activeView === "nearby" ? "bg-background shadow text-foreground" : "text-muted-foreground"
+          }`}
+          onClick={() => setActiveView("nearby")}
+        >
+          <Navigation className="h-3.5 w-3.5" /> Nearby
+        </button>
+      </div>
 
-          return (
-            <TabsContent key={dayNum} value={String(dayNum)} className="space-y-3 mt-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Calendar className="h-4 w-4 text-primary" />
-                  <span className="text-sm font-medium">{format(dayDate, "EEE, MMM d")}</span>
+      {/* Map View */}
+      {activeView === "map" && (
+        <Suspense fallback={<MapFallback />}>
+          <div className="space-y-3">
+            <TripMap
+              destination={trip.destination}
+              activities={mapActivities}
+              height="350px"
+            />
+            <p className="text-[10px] text-muted-foreground text-center">
+              Tap a pin to see details · Tap "Get Directions" to open Google Maps
+            </p>
+          </div>
+        </Suspense>
+      )}
+
+      {/* Nearby Attractions */}
+      {activeView === "nearby" && (
+        <Suspense fallback={<MapFallback />}>
+          <NearbyAttractions destinationName={trip.destination} />
+        </Suspense>
+      )}
+
+      {/* Timeline View */}
+      {activeView === "timeline" && (
+        <Tabs defaultValue="1">
+          <TabsList className="w-full overflow-x-auto flex">
+            {Array.from({ length: totalDays }, (_, i) => (
+              <TabsTrigger key={i + 1} value={String(i + 1)} className="flex-shrink-0 text-xs">
+                Day {i + 1}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+          {Array.from({ length: totalDays }, (_, i) => {
+            const dayNum = i + 1;
+            const dayActivities = activities?.filter((a) => a.day_number === dayNum) ?? [];
+            const dayDate = addDays(new Date(trip.start_date), i);
+
+            return (
+              <TabsContent key={dayNum} value={String(dayNum)} className="space-y-3 mt-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Calendar className="h-4 w-4 text-primary" />
+                    <span className="text-sm font-medium">{format(dayDate, "EEE, MMM d")}</span>
+                  </div>
+                  <Badge variant="outline" className="text-[10px]">{dayActivities.length} activities</Badge>
                 </div>
-                <Badge variant="outline" className="text-[10px]">{dayActivities.length} activities</Badge>
-              </div>
 
-              {dayActivities.length === 0 ? (
-                <Card className="border-dashed">
-                  <CardContent className="py-8 text-center">
-                    <p className="text-sm text-muted-foreground mb-3">No activities planned</p>
-                  </CardContent>
-                </Card>
-              ) : (
-                <div className="space-y-2">
-                  {dayActivities.map((a) => (
-                    <ActivityCard key={a.id} activity={a} tripId={trip.id} />
-                  ))}
-                </div>
-              )}
+                {dayActivities.length === 0 ? (
+                  <Card className="border-dashed">
+                    <CardContent className="py-8 text-center">
+                      <p className="text-sm text-muted-foreground mb-3">No activities planned</p>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <div className="space-y-2">
+                    {dayActivities.map((a) => (
+                      <ActivityCard key={a.id} activity={a} tripId={trip.id} destination={trip.destination} />
+                    ))}
+                  </div>
+                )}
 
-              <Dialog open={dialogDay === dayNum} onOpenChange={(open) => setDialogDay(open ? dayNum : null)}>
-                <DialogTrigger asChild>
-                  <Button variant="outline" size="sm" className="w-full gap-1 text-xs">
-                    <Plus className="h-3 w-3" /> Add Activity
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Add Activity — Day {dayNum}</DialogTitle>
-                  </DialogHeader>
-                  <AddActivityDialog tripId={trip.id} dayNumber={dayNum} onClose={() => setDialogDay(null)} />
-                </DialogContent>
-              </Dialog>
-            </TabsContent>
-          );
-        })}
-      </Tabs>
+                <Dialog open={dialogDay === dayNum} onOpenChange={(open) => setDialogDay(open ? dayNum : null)}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline" size="sm" className="w-full gap-1 text-xs">
+                      <Plus className="h-3 w-3" /> Add Activity
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Add Activity — Day {dayNum}</DialogTitle>
+                    </DialogHeader>
+                    <AddActivityDialog tripId={trip.id} dayNumber={dayNum} onClose={() => setDialogDay(null)} />
+                  </DialogContent>
+                </Dialog>
+              </TabsContent>
+            );
+          })}
+        </Tabs>
+      )}
 
       {/* Actions */}
       <div className="flex gap-3 pt-2">

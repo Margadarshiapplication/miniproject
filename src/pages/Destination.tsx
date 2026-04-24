@@ -1,16 +1,29 @@
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Heart, MapPin, Thermometer, Wallet, Lightbulb, Activity } from "lucide-react";
+import { ArrowLeft, Heart, MapPin, Thermometer, Wallet, Lightbulb, Activity, Map, Navigation } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { destinations } from "@/data/destinations";
-import { useState } from "react";
+import { useState, lazy, Suspense } from "react";
+import { KNOWN_COORDS, getGoogleMapsUrl } from "@/lib/geo";
+
+const NearbyAttractions = lazy(() => import("@/components/NearbyAttractions"));
+
+const MapFallback = () => (
+  <div className="rounded-xl border bg-muted/30 flex items-center justify-center h-[200px]">
+    <div className="flex flex-col items-center gap-2 text-muted-foreground">
+      <div className="h-5 w-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      <span className="text-xs">Loading map...</span>
+    </div>
+  </div>
+);
 
 const Destination = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const [wishlisted, setWishlisted] = useState(false);
+  const [showNearby, setShowNearby] = useState(false);
 
   const dest = destinations.find((d) => d.id === id);
 
@@ -25,6 +38,9 @@ const Destination = () => {
       </div>
     );
   }
+
+  // Get known coordinates for the destination
+  const coords = KNOWN_COORDS[dest.id] || null;
 
   return (
     <div className="pb-6">
@@ -76,6 +92,17 @@ const Destination = () => {
           </Card>
         </div>
 
+        {/* Open in Google Maps */}
+        <a
+          href={getGoogleMapsUrl(dest.name, "India")}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-2 text-sm text-primary hover:underline font-medium"
+        >
+          <Map className="h-4 w-4" /> View {dest.name} on Google Maps
+          <Navigation className="h-3 w-3 opacity-50" />
+        </a>
+
         {/* Overview */}
         <div>
           <h2 className="text-base font-bold font-heading mb-2">Overview</h2>
@@ -98,19 +125,52 @@ const Destination = () => {
           ))}
         </div>
 
-        {/* Activities */}
+        {/* Activities — now clickable to open in Google Maps */}
         <div>
           <h2 className="text-base font-bold font-heading mb-2">Top Activities</h2>
           <div className="space-y-2">
             {dest.activities.map((activity, i) => (
-              <div key={i} className="flex items-center gap-3 rounded-lg bg-muted/50 p-3">
+              <a
+                key={i}
+                href={getGoogleMapsUrl(activity, dest.name)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-3 rounded-lg bg-muted/50 p-3 hover:bg-muted transition-colors cursor-pointer"
+              >
                 <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
                   {i + 1}
                 </span>
-                <span className="text-sm">{activity}</span>
-              </div>
+                <span className="text-sm flex-1">{activity}</span>
+                <Navigation className="h-3.5 w-3.5 text-muted-foreground" />
+              </a>
             ))}
           </div>
+        </div>
+
+        <Separator />
+
+        {/* Nearby Attractions */}
+        <div>
+          <Button
+            variant="outline"
+            className="w-full gap-2"
+            onClick={() => setShowNearby(!showNearby)}
+          >
+            <MapPin className="h-4 w-4" />
+            {showNearby ? "Hide" : "Explore"} Nearby Attractions
+          </Button>
+
+          {showNearby && (
+            <div className="mt-3">
+              <Suspense fallback={<MapFallback />}>
+                <NearbyAttractions
+                  destinationName={dest.name}
+                  destinationLat={coords?.lat}
+                  destinationLng={coords?.lng}
+                />
+              </Suspense>
+            </div>
+          )}
         </div>
 
         <Separator />
