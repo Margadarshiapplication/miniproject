@@ -12,8 +12,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
 import { useCreateTrip } from "@/hooks/useTrips";
-import { useAddActivity } from "@/hooks/useActivities";
 import { useGenerateItinerary } from "@/hooks/useGenerateItinerary";
+import { supabase } from "@/integrations/supabase/client";
 import { destinations } from "@/data/destinations";
 import { toast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
@@ -22,7 +22,6 @@ const PlanTrip = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const createTrip = useCreateTrip();
-  const addActivity = useAddActivity();
   const { generate, isGenerating } = useGenerateItinerary();
 
   const [destination, setDestination] = useState("");
@@ -58,7 +57,6 @@ const PlanTrip = () => {
     let trip: { id: string };
 
     try {
-      const days = differenceInDays(endDate, startDate) + 1;
       trip = await createTrip.mutateAsync({
         destination: destination.trim(),
         destination_id: destinationId,
@@ -74,43 +72,32 @@ const PlanTrip = () => {
       return;
     }
 
-    // Generate AI itinerary BEFORE navigating (so user sees activities immediately)
+    // Generate AI itinerary — saves to both Supabase AND localStorage automatically
     toast({ title: "Trip created!", description: "Generating AI itinerary... Please wait ✨" });
 
-    let aiSuccess = false;
     try {
       const days = differenceInDays(endDate, startDate) + 1;
-      const itinerary = await generate({
-        destination: destination.trim(),
-        days,
-        budget: budget ? parseFloat(budget) : undefined,
-        travelers: parseInt(travelers) || 1,
-        preferences: notes.trim() || undefined,
-      });
+      const userId = (await supabase.auth.getSession()).data.session?.user?.id;
 
-      // generate() now throws on error, so if we reach here it succeeded
-      if (itinerary?.activities?.length) {
-        for (let i = 0; i < itinerary.activities.length; i++) {
-          const a = itinerary.activities[i];
-          await addActivity.mutateAsync({
-            trip_id: trip.id,
-            day_number: a.day_number,
-            time_slot: a.time_slot,
-            title: a.title,
-            description: a.description,
-            location: a.location,
-            estimated_cost: a.estimated_cost,
-            photo_url: a.photo_url ?? null,
-            sort_order: i,
-          });
-        }
-        // Invalidate the activities cache so Itinerary page shows them immediately
-        await queryClient.invalidateQueries({ queryKey: ["trip_activities", trip.id] });
-        toast({ title: "Itinerary ready! ✨", description: `${itinerary.activities.length} activities generated.` });
-        aiSuccess = true;
-      }
+      const itinerary = await generate(
+        {
+          destination: destination.trim(),
+          days,
+          budget: budget ? parseFloat(budget) : undefined,
+          travelers: parseInt(travelers) || 1,
+          preferences: notes.trim() || undefined,
+        },
+        trip.id,
+        userId,
+      );
+
+      // Invalidate cache so Itinerary page shows the activities
+      await queryClient.invalidateQueries({ queryKey: ["trip_activities", trip.id] });
+      toast({
+        title: "Itinerary ready! ✨",
+        description: `${itinerary.activities.length} activities generated.`,
+      });
     } catch (aiErr) {
-      // AI failed but trip was already saved — inform the user with a specific message
       const aiMsg = aiErr instanceof Error ? aiErr.message : "AI generation failed.";
       toast({
         title: "AI generation skipped",
@@ -123,11 +110,10 @@ const PlanTrip = () => {
       });
     }
 
-    // Navigate AFTER activities are saved so the page shows them
+    // Always navigate to the itinerary page
     navigate(`/itinerary/${trip.id}`);
-
-
   };
+
 
   return (
     <div className="px-4 py-6 space-y-6 max-w-lg mx-auto">

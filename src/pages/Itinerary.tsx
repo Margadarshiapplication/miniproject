@@ -1,4 +1,4 @@
-import { useState, lazy, Suspense } from "react";
+import { useState, useMemo, lazy, Suspense } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { format, differenceInDays, addDays } from "date-fns";
 import { ArrowLeft, Plus, MapPin, Clock, IndianRupee, CheckCircle2, Circle, Calendar, Map, Navigation, ExternalLink } from "lucide-react";
@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useTrip, useTripActivities, useAddActivity, useToggleActivity, type TripActivity } from "@/hooks/useTrips";
+import { loadItineraryFromLocalStorage } from "@/hooks/useGenerateItinerary";
 import { toast } from "@/hooks/use-toast";
 import { getGoogleMapsUrl } from "@/lib/geo";
 
@@ -156,9 +157,42 @@ const Itinerary = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { data: trip, isLoading: tripLoading } = useTrip(id);
-  const { data: activities } = useTripActivities(id);
+  const { data: supabaseActivities } = useTripActivities(id);
   const [dialogDay, setDialogDay] = useState<number | null>(null);
   const [activeView, setActiveView] = useState<"timeline" | "map" | "nearby">("timeline");
+
+  // Merge Supabase activities with localStorage fallback
+  const activities = useMemo(() => {
+    // If Supabase returned activities, use those
+    if (supabaseActivities && supabaseActivities.length > 0) {
+      return supabaseActivities;
+    }
+
+    // Fallback: try loading from localStorage
+    if (id) {
+      const cached = loadItineraryFromLocalStorage(id);
+      if (cached?.activities?.length) {
+        // Convert to TripActivity shape for compatibility
+        return cached.activities.map((a, i) => ({
+          id: `local-${i}`,
+          trip_id: id,
+          user_id: "",
+          day_number: a.day_number,
+          time_slot: a.time_slot || null,
+          title: a.title,
+          description: a.description || null,
+          location: a.location || null,
+          estimated_cost: a.estimated_cost || 0,
+          photo_url: a.photo_url || null,
+          is_completed: false,
+          sort_order: i,
+          created_at: new Date().toISOString(),
+        })) as TripActivity[];
+      }
+    }
+
+    return supabaseActivities ?? [];
+  }, [supabaseActivities, id]);
 
   if (tripLoading) {
     return (
