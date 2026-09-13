@@ -53,7 +53,7 @@ export const useChat = () => {
 
   const send = useCallback(
     async (input: string) => {
-      if (!user || !input.trim()) return;
+      if (!input.trim()) return;
       const userMsg: Msg = { role: "user", content: input.trim() };
       setMessages((prev) => [...prev, userMsg]);
       setIsLoading(true);
@@ -61,25 +61,43 @@ export const useChat = () => {
       let convId = conversationId;
 
       try {
-        // Create conversation if needed
+        // Create/persist conversation — only if user is logged in, non-fatal if it fails
         if (!convId) {
-          const { data, error } = await supabase
-            .from("conversations")
-            .insert({ user_id: user.id, title: input.trim().slice(0, 60) })
-            .select()
-            .single();
-          if (error) throw error;
-          convId = data.id;
-          setConversationId(convId);
+          if (user) {
+            try {
+              const { data, error } = await supabase
+                .from("conversations")
+                .insert({ user_id: user.id, title: input.trim().slice(0, 60) })
+                .select()
+                .single();
+              if (!error && data) {
+                convId = data.id;
+                setConversationId(convId);
+              }
+            } catch {
+              // Supabase unavailable — fall through to local ID
+            }
+          }
+          // If still no convId (guest or Supabase failed), use a temporary local ID
+          if (!convId) {
+            convId = `local-${Date.now()}`;
+            setConversationId(convId);
+          }
         }
 
-        // Save user message (RLS enforces role='user' for client inserts)
-        await supabase.from("chat_messages").insert({
-          conversation_id: convId,
-          user_id: user.id,
-          role: "user",
-          content: input.trim(),
-        });
+        // Persist user message — best-effort, non-fatal
+        if (user && convId && !convId.startsWith("local-")) {
+          try {
+            await supabase.from("chat_messages").insert({
+              conversation_id: convId,
+              user_id: user.id,
+              role: "user",
+              content: input.trim(),
+            });
+          } catch {
+            // Non-fatal — AI still gets the message
+          }
+        }
 
         let assistantSoFar = "";
         const controller = new AbortController();
@@ -102,19 +120,22 @@ export const useChat = () => {
           messages: [...messages, userMsg],
           conversationId: convId,
           onDelta: upsertAssistant,
-          onDone: async () => {
-            setIsLoading(false);
-            // Assistant message is now saved server-side by the edge function
-            queryClient.invalidateQueries({ queryKey: ["conversations"] });
+          onDone: () => {
+            // Refresh conversation list in sidebar — best-effort
+            try {
+              queryClient.invalidateQueries({ queryKey: ["conversations"] });
+            } catch { /* ignore */ }
           },
           signal: controller.signal,
         });
       } catch (e: unknown) {
         if (e instanceof Error && e.name === "AbortError") return;
-        console.error(e);
-        setIsLoading(false);
+        console.error("[Margdarshi] Chat error:", e);
         const msg = e instanceof Error ? e.message : "Something went wrong. Please try again.";
         setMessages((prev) => [...prev, { role: "assistant", content: `⚠️ ${msg}` }]);
+      } finally {
+        // Always unblock the UI, even if something crashed mid-stream
+        setIsLoading(false);
       }
     },
     [user, conversationId, messages, queryClient]

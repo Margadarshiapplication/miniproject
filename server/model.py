@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 _pipeline = None  # Set to truthy when client is ready
 
-MODEL_ID = "meta/llama-3.1-8b-instruct"
+MODEL_ID = "microsoft/phi-3-mini-4k-instruct"
 NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 
 

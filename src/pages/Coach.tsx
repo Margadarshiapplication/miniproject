@@ -171,6 +171,11 @@ const Coach = () => {
             </Button>
           )}
         </form>
+        {isLoading && (
+          <p className="text-[10px] text-muted-foreground text-center mt-1.5">
+            AI is thinking… may take 20–40 sec on free tier ☕
+          </p>
+        )}
       </div>
     </div>
   );

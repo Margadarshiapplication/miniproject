@@ -17,17 +17,25 @@ export async function streamChat({
   onDone: () => void;
   signal?: AbortSignal;
 }) {
-  // Get the current session token for auth
-  const { data: { session } } = await supabase.auth.getSession();
-  const token = session?.access_token;
-  if (!token) throw new Error("Not authenticated");
+  // Get the current session token — optional, backend doesn't require auth
+  let token: string | undefined;
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    token = session?.access_token ?? undefined;
+  } catch {
+    // Auth not available — continue without token
+  }
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
 
   const resp = await fetch(`${API_URL}/api/chat`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
+    headers,
     body: JSON.stringify({ messages, conversation_id: conversationId }),
     signal,
   });
